@@ -81,3 +81,141 @@ def login():
     # version 1 keeps this simple, the client just remembers the user_id
     # after logging in and sends it with later requests, no session token yet
     return jsonify({"user_id": user["id"], "name": user["name"]}), 200
+
+
+# Households
+@app.route("/household/create", methods=["POST"])
+def create_household():
+    data = request.get_json()
+    name = data.get("name")
+    user_id = data.get("user_id")
+
+    if not name or not user_id:
+        return jsonify({"error": "name and user_id are required"}), 400
+
+    invite_code = generate_invite_code()
+
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute(
+        "INSERT INTO households (name, invite_code) VALUES (?, ?)",
+        (name, invite_code),
+    )
+    household_id = cursor.lastrowid
+
+    # whoever creates the household is automatically a member of it too
+    cursor.execute(
+        "INSERT INTO household_members (user_id, household_id) VALUES (?, ?)",
+        (user_id, household_id),
+    )
+    conn.commit()
+    conn.close()
+
+    return jsonify({
+        "household_id": household_id,
+        "name": name,
+        "invite_code": invite_code
+    }), 201
+
+
+@app.route("/household/join", methods=["POST"])
+def join_household():
+    data = request.get_json()
+    invite_code = data.get("invite_code")
+    user_id = data.get("user_id")
+
+    conn = get_connection()
+    household = conn.execute(
+        "SELECT * FROM households WHERE invite_code = ?", (invite_code,)
+    ).fetchone()
+
+    if household is None:
+        conn.close()
+        return jsonify({"error": "No household found with that invite code"}), 404
+
+    # check they're not already a member first, so re-joining doesn't duplicate the row
+    existing = conn.execute(
+        "SELECT * FROM household_members WHERE user_id = ? AND household_id = ?",
+        (user_id, household["id"]),
+    ).fetchone()
+
+    if existing is None:
+        conn.execute(
+            "INSERT INTO household_members (user_id, household_id) VALUES (?, ?)",
+            (user_id, household["id"]),
+        )
+        conn.commit()
+
+    conn.close()
+    return jsonify({"household_id": household["id"], "name": household["name"]}), 200
+
+
+@app.route("/user/<int:user_id>/households", methods=["GET"])
+def get_user_households(user_id):
+    # returns every household this user belongs to, used after login
+    # to skip straight to the list instead of asking them to join again
+    conn = get_connection()
+    households = conn.execute(
+        """
+        SELECT households.id, households.name, households.invite_code
+        FROM households
+        JOIN household_members ON households.id = household_members.household_id
+        WHERE household_members.user_id = ?
+        """,
+        (user_id,),
+    ).fetchall()
+    conn.close()
+
+    households_list = [dict(h) for h in households]
+    return jsonify({"households": households_list}), 200
+
+
+@app.route("/household/<int:household_id>", methods=["GET"])
+def get_household(household_id):
+    # returns one household's own details (name + invite code), used by the account screen
+    conn = get_connection()
+    household = conn.execute(
+        "SELECT id, name, invite_code FROM households WHERE id = ?",
+        (household_id,),
+    ).fetchone()
+    conn.close()
+
+    if household is None:
+        return jsonify({"error": "Household not found"}), 404
+
+    return jsonify(dict(household)), 200
+
+
+@app.route("/household/<int:household_id>/members", methods=["GET"])
+def get_household_members(household_id):
+    # returns everyone in a household, used by the account screen
+    conn = get_connection()
+    members = conn.execute(
+        """
+        SELECT users.id, users.name, users.email
+        FROM users
+        JOIN household_members ON users.id = household_members.user_id
+        WHERE household_members.household_id = ?
+        ORDER BY users.name
+        """,
+        (household_id,),
+    ).fetchall()
+    conn.close()
+
+    members_list = [dict(m) for m in members]
+    return jsonify({"members": members_list}), 200
+
+
+@app.route("/user/<int:user_id>", methods=["GET"])
+def get_user(user_id):
+    # returns one user's own name/email, used by the account screen
+    conn = get_connection()
+    user = conn.execute(
+        "SELECT id, name, email FROM users WHERE id = ?", (user_id,)
+    ).fetchone()
+    conn.close()
+
+    if user is None:
+        return jsonify({"error": "User not found"}), 404
+
+    return jsonify(dict(user)), 200
