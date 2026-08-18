@@ -219,3 +219,102 @@ def get_user(user_id):
         return jsonify({"error": "User not found"}), 404
 
     return jsonify(dict(user)), 200
+
+
+# Grocery list
+@app.route("/household/<int:household_id>/list", methods=["GET"])
+def get_list(household_id):
+    conn = get_connection()
+    # joins onto users so we get the name of whoever added each item
+    items = conn.execute(
+        """
+        SELECT list_items.id, list_items.name, list_items.category,
+               list_items.checked_off, users.name AS added_by_name
+        FROM list_items
+        JOIN users ON list_items.added_by = users.id
+        WHERE list_items.household_id = ?
+        ORDER BY list_items.category, list_items.name
+        """,
+        (household_id,),
+    ).fetchall()
+    conn.close()
+
+    items_list = [dict(item) for item in items]
+    return jsonify({"items": items_list}), 200
+
+
+@app.route("/household/<int:household_id>/list", methods=["POST"])
+def add_item(household_id):
+    data = request.get_json()
+    name = data.get("name")
+    category = data.get("category", "Uncategorised")
+    added_by = data.get("user_id")
+
+    if not name or not added_by:
+        return jsonify({"error": "name and user_id are required"}), 400
+
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute(
+        """
+        INSERT INTO list_items (household_id, name, category, added_by)
+        VALUES (?, ?, ?, ?)
+        """,
+        (household_id, name, category, added_by),
+    )
+    conn.commit()
+    item_id = cursor.lastrowid
+    conn.close()
+
+    return jsonify({"item_id": item_id, "name": name, "category": category}), 201
+
+
+@app.route("/list_item/<int:item_id>", methods=["PATCH"])
+def update_item(item_id):
+    # PATCH means "update part of this", so only touch the fields that were actually sent
+    data = request.get_json()
+
+    conn = get_connection()
+    if "checked_off" in data:
+        conn.execute(
+            "UPDATE list_items SET checked_off = ? WHERE id = ?",
+            (1 if data["checked_off"] else 0, item_id),
+        )
+    if "name" in data:
+        conn.execute(
+            "UPDATE list_items SET name = ? WHERE id = ?", (data["name"], item_id)
+        )
+    conn.commit()
+    conn.close()
+
+    return jsonify({"message": "Item updated"}), 200
+
+
+@app.route("/list_item/<int:item_id>", methods=["DELETE"])
+def delete_item(item_id):
+    conn = get_connection()
+    conn.execute("DELETE FROM list_items WHERE id = ?", (item_id,))
+    conn.commit()
+    conn.close()
+
+    return jsonify({"message": "Item deleted"}), 200
+
+
+@app.route("/household/<int:household_id>/list/checked", methods=["DELETE"])
+def clear_checked_items(household_id):
+    # deletes every checked-off item for a household in one go, instead of
+    # the Tkinter side calling delete_item() in a loop for each one
+    conn = get_connection()
+    conn.execute(
+        "DELETE FROM list_items WHERE household_id = ? AND checked_off = 1",
+        (household_id,),
+    )
+    conn.commit()
+    conn.close()
+
+    return jsonify({"message": "Checked items cleared"}), 200
+
+
+if __name__ == "__main__":
+    # use_reloader=False avoids a known Windows bug with Flask's auto-restart feature
+    app.run(debug=True, use_reloader=False)
