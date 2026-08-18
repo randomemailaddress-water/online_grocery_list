@@ -263,7 +263,7 @@ class ListScreen(tk.Frame):
         header = tk.Frame(self)
         header.pack(fill="x", pady=(15, 5), padx=15)
         tk.Label(header, text=app.current_household_name, font=FONT_HEADING).pack(side="left")
-        # tk.Button(header, text="Account", command=lambda: app.show_screen(AccountScreen)).pack(side="right")
+        tk.Button(header, text="Account", command=lambda: app.show_screen(AccountScreen)).pack(side="right")
 
         # row for adding a new item
         add_frame = tk.Frame(self)
@@ -404,6 +404,49 @@ class ListScreen(tk.Frame):
             messagebox.showerror("Error", str(error))
             return
         self.load_items()
+
+
+class AccountScreen(tk.Frame):
+    # shows the logged-in user's own details, household details, and who's in it
+    def __init__(self, app):
+        super().__init__(app)
+        self.app = app
+
+        header = tk.Frame(self)
+        header.pack(fill="x", pady=(15, 10), padx=15)
+        tk.Button(header, text="< Back to List", command=lambda: app.show_screen(ListScreen)).pack(side="left")
+
+        tk.Label(self, text="Account", font=FONT_HEADING).pack(pady=(5, 15))
+
+        # needs three separate calls: the user's own details, the
+        # household's details, and the member list. bail out if any fail.
+        try:
+            user = api_client.get_user(app.current_user_id)
+            household = api_client.get_household(app.current_household_id)
+            members_result = api_client.get_household_members(app.current_household_id)
+            members = members_result["members"]
+        except api_client.ApiError as error:
+            tk.Label(self, text=str(error), fg="red").pack(pady=20)
+            return
+
+        info_frame = tk.Frame(self)
+        info_frame.pack(pady=5, padx=25, fill="x")
+
+        tk.Label(info_frame, text="Your Name", font=FONT_SUBHEADING).pack(anchor="w")
+        tk.Label(info_frame, text=user["name"]).pack(anchor="w", pady=(0, 8))
+
+        tk.Label(info_frame, text="Your Email", font=FONT_SUBHEADING).pack(anchor="w")
+        tk.Label(info_frame, text=user["email"]).pack(anchor="w", pady=(0, 8))
+
+        tk.Label(info_frame, text="Household", font=FONT_SUBHEADING).pack(anchor="w")
+        tk.Label(info_frame, text=household["name"]).pack(anchor="w", pady=(0, 8))
+
+        tk.Label(info_frame, text="Invite Code", font=FONT_SUBHEADING).pack(anchor="w")
+        tk.Label(info_frame, text=household["invite_code"]).pack(anchor="w", pady=(0, 8))
+
+        tk.Label(info_frame, text="Household Members", font=FONT_SUBHEADING).pack(anchor="w", pady=(10, 2))
+        for member in members:
+            tk.Label(info_frame, text=f'• {member["name"]}').pack(anchor="w")
 
 
 if __name__ == "__main__":
