@@ -91,7 +91,7 @@ class App(tk.Tk):
         elif len(households) == 1:
             self.current_household_id = households[0]["id"]
             self.current_household_name = households[0]["name"]
-            # self.show_screen(ListScreen)
+            self.show_screen(ListScreen)
         else:
             self.show_screen(HouseholdChoiceScreen)
 
@@ -185,7 +185,7 @@ class HouseholdChoiceScreen(tk.Frame):
     def choose_household(self, household):
         self.app.current_household_id = household["id"]
         self.app.current_household_name = household["name"]
-        # self.app.show_screen(ListScreen)
+        self.app.show_screen(ListScreen)
 
 
 class HouseholdScreen(tk.Frame):
@@ -232,7 +232,7 @@ class HouseholdScreen(tk.Frame):
             f"Share this invite code with your household: {result['invite_code']}\n\n"
             "You can find this code again later from the Account screen."
         )
-        # self.app.show_screen(ListScreen)
+        self.app.show_screen(ListScreen)
 
     def handle_join(self):
         code = self.invite_code_entry.get().strip().upper()
@@ -247,7 +247,163 @@ class HouseholdScreen(tk.Frame):
 
         self.app.current_household_id = result["household_id"]
         self.app.current_household_name = result["name"]
-        # self.app.show_screen(ListScreen)
+        self.app.show_screen(ListScreen)
+
+
+class ListScreen(tk.Frame):
+    # main screen, the actual shared grocery list
+    def __init__(self, app):
+        super().__init__(app)
+        self.app = app
+
+        # tracks each item's checkbox tick-state, keyed by item id
+        self.item_checkbox_vars = {}
+
+        # header row: household name on the left, account button on the right
+        header = tk.Frame(self)
+        header.pack(fill="x", pady=(15, 5), padx=15)
+        tk.Label(header, text=app.current_household_name, font=FONT_HEADING).pack(side="left")
+        # tk.Button(header, text="Account", command=lambda: app.show_screen(AccountScreen)).pack(side="right")
+
+        # row for adding a new item
+        add_frame = tk.Frame(self)
+        add_frame.pack(pady=10)
+        self.new_item_entry = PlaceholderEntry(add_frame, "Item name", width=18)
+        self.new_item_entry.grid(row=0, column=0, padx=4)
+        self.new_category_entry = PlaceholderEntry(add_frame, "Category", width=12)
+        self.new_category_entry.grid(row=0, column=1, padx=4)
+        tk.Button(add_frame, text="Add", command=self.handle_add_item).grid(row=0, column=2, padx=4)
+
+        # scrollable area for the list itself. a plain frame can't scroll on
+        # its own, so this puts a frame inside a canvas and scrolls the canvas.
+        canvas_frame = tk.Frame(self)
+        canvas_frame.pack(fill="both", expand=True, padx=15, pady=5)
+        canvas = tk.Canvas(canvas_frame, highlightthickness=0)
+        scrollbar = tk.Scrollbar(canvas_frame, orient="vertical", command=canvas.yview)
+        self.list_frame = tk.Frame(canvas)
+        self.list_frame.bind(
+            "<Configure>", lambda e: canvas.configure(scrollregion=canvas.bbox("all"))
+        )
+        canvas.create_window((0, 0), window=self.list_frame, anchor="nw")
+        canvas.configure(yscrollcommand=scrollbar.set)
+        canvas.pack(side="left", fill="both", expand=True)
+        scrollbar.pack(side="right", fill="y")
+
+        # bottom row: refresh and clear-checked buttons
+        bottom_frame = tk.Frame(self)
+        bottom_frame.pack(pady=10, fill="x", padx=15)
+        tk.Button(bottom_frame, text="Refresh List", command=self.load_items).pack(side="left")
+        tk.Button(bottom_frame, text="Clear Checked Items", command=self.handle_clear_checked).pack(side="right")
+
+        self.load_items()
+
+    def load_items(self):
+        # wipes every row currently shown and rebuilds from the latest data,
+        # simpler than figuring out exactly what changed
+        for widget in self.list_frame.winfo_children():
+            widget.destroy()
+        self.item_checkbox_vars = {}
+
+        try:
+            result = api_client.get_list(self.app.current_household_id)
+        except api_client.ApiError as error:
+            tk.Label(self.list_frame, text=str(error), fg="red", wraplength=300).pack()
+            return
+
+        items = result["items"]
+        if not items:
+            tk.Label(self.list_frame, text="No items yet, add one above!").pack(pady=10)
+            return
+
+        # items come back already sorted by category, so print a new
+        # heading whenever the category changes as we loop through
+        current_category = None
+        for item in items:
+            if item["category"] != current_category:
+                current_category = item["category"]
+                tk.Label(
+                    self.list_frame, text=current_category, font=FONT_SUBHEADING
+                ).pack(anchor="w", pady=(10, 2))
+
+            self._build_item_row(item)
+
+    def _build_item_row(self, item):
+        # builds one row: checkbox, item name, remove button
+        checked_var = tk.BooleanVar(value=bool(item["checked_off"]))
+        self.item_checkbox_vars[item["id"]] = checked_var
+
+        row = tk.Frame(self.list_frame)
+        row.pack(fill="x", anchor="w", pady=1)
+
+        # checked-off items get a strikethrough so it's obvious at a glance
+        label_font = tkfont.Font(font=("TkDefaultFont", 10))
+        if item["checked_off"]:
+            label_font.configure(overstrike=True)
+
+        checkbox = tk.Checkbutton(
+            row, variable=checked_var,
+            command=lambda item_id=item["id"], var=checked_var: self.handle_toggle(item_id, var)
+        )
+        checkbox.pack(side="left")
+
+        label = tk.Label(
+            row, text=f'{item["name"]} (added by {item["added_by_name"]})',
+            font=label_font, anchor="w"
+        )
+        label.pack(side="left", fill="x", expand=True)
+
+        remove_button = tk.Button(
+            row, text="Remove", width=8,
+            command=lambda item_id=item["id"]: self.handle_remove(item_id)
+        )
+        remove_button.pack(side="right")
+
+    def handle_add_item(self):
+        name = self.new_item_entry.get_value()
+        category = self.new_category_entry.get_value() or "Uncategorised"
+        if not name:
+            return
+
+        try:
+            api_client.add_item(self.app.current_household_id, name, category, self.app.current_user_id)
+        except api_client.ApiError as error:
+            messagebox.showerror("Error", str(error))
+            return
+
+        # clear both boxes back to placeholder state ready for the next item
+        self.new_item_entry.delete(0, tk.END)
+        self.new_item_entry._restore_placeholder()
+        self.new_category_entry.delete(0, tk.END)
+        self.new_category_entry._restore_placeholder()
+
+        self.load_items()
+
+    def handle_toggle(self, item_id, checked_var):
+        try:
+            api_client.set_checked_off(item_id, checked_var.get())
+        except api_client.ApiError as error:
+            messagebox.showerror("Error", str(error))
+            return
+        # reload so the strikethrough actually gets applied, not just the checkbox tick
+        self.load_items()
+
+    def handle_remove(self, item_id):
+        try:
+            api_client.delete_item(item_id)
+        except api_client.ApiError as error:
+            messagebox.showerror("Error", str(error))
+            return
+        self.load_items()
+
+    def handle_clear_checked(self):
+        if not messagebox.askyesno("Clear Checked Items", "Remove every checked-off item from the list?"):
+            return
+        try:
+            api_client.clear_checked_items(self.app.current_household_id)
+        except api_client.ApiError as error:
+            messagebox.showerror("Error", str(error))
+            return
+        self.load_items()
 
 
 if __name__ == "__main__":
