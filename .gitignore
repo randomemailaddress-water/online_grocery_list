@@ -1,0 +1,13 @@
+# Virtual environment
+venv/
+
+# Python cache files
+__pycache__/
+*.pyc
+
+# Local SQLite database (recreated automatically by running database.py)
+grocery_list.db
+
+# Editor/OS files
+.vscode/
+.DS_Store
