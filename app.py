@@ -295,11 +295,28 @@ def add_item(household_id):
     # this flag lets the Tkinter client say "yes, I know it's a
     # duplicate, add it anyway", defaults to False so a normal add
     # always gets the duplicate check
+    confirm_duplicate = data.get("confirm_duplicate", False)
 
     if not name or not added_by:
         return jsonify({"error": "name and user_id are required"}), 400
 
     conn = get_connection()
+
+    # only checks against items still on the list (checked_off = 0),
+    # since re-adding something already bought and checked off is
+    # normal restocking, not a duplicate mistake
+    if not confirm_duplicate:
+        # LOWER() on both sides makes this comparison case-insensitive,
+        # so "Milk" and "milk" count as the same item
+        existing = conn.execute(
+            "SELECT id FROM list_items WHERE household_id = ? AND checked_off = 0 AND LOWER(name) = LOWER(?)",
+            (household_id, name),
+        ).fetchone()
+        if existing is not None:
+            conn.close()
+            # 409 means "conflict", the duplicate: true flag is what
+            # lets api_client.py tell this apart from a normal error
+            return jsonify({"error": "That item is already on the list", "duplicate": True}), 409
 
     cursor = conn.cursor()
     cursor.execute(

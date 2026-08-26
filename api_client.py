@@ -8,20 +8,31 @@ never has to deal with URLs or JSON directly.
 # importing modules
 import requests
 
-# the address of the local flask server, only works if it's running
-# on this same device as i haven't yet setup an online server.
+# the address of the flask server, only works if it's running on this
+# same device. if the server ever gets hosted somewhere else, this is
+# the only line that needs to change
 BASE_URL = "http://127.0.0.1:5000"
+
 
 class ApiError(Exception):
     # raised any time something goes wrong talking to the server,
     # whether that's the server rejecting the request or not being
-    # reachable at all. main.py only ever needs to catch this one type.
+    # reachable at all. main.py only ever needs to catch this one type
     pass
+
+
+class DuplicateItemError(ApiError):
+    # a more specific version of ApiError, raised only when the server
+    # rejects an item because it's already on the list. main.py catches
+    # this separately so it can ask "add it anyway?" instead of just
+    # showing a plain error
+    pass
+
 
 def _request(method, path, json_data=None):
     # the one place that actually calls requests.request(). every
     # function below goes through this, so connection problems only
-    # need to be handled here instead of in every single function.
+    # need to be handled here instead of in every single function
     url = f"{BASE_URL}{path}"
     try:
         response = requests.request(method, url, json=json_data, timeout=5)
@@ -31,55 +42,89 @@ def _request(method, path, json_data=None):
         raise ApiError("The server took too long to respond. Try again.")
 
     if response.status_code >= 400:
+        # try to read the specific error message Flask sent back,
+        # fall back to a generic one if the response isn't valid JSON
+        # for some reason
         try:
-            message = response.json().get("error", "Something went wrong")
+            body = response.json()
+            message = body.get("error", "Something went wrong")
         except ValueError:
+            body = {}
             message = "Something went wrong"
+
+        # if the server flagged this specifically as a duplicate item,
+        # raise the more specific error type instead of the generic one
+        if body.get("duplicate"):
+            raise DuplicateItemError(message)
         raise ApiError(message)
 
     return response.json()
 
+
 def signup(name, email, password):
+    # every function below follows the same shape: build a dictionary of
+    # whatever needs to go to the server, hand it to _request() along
+    # with the HTTP method and URL
     return _request("POST", "/signup", {"name": name, "email": email, "password": password})
+
 
 def login(email, password):
     return _request("POST", "/login", {"email": email, "password": password})
 
+
 def create_household(name, user_id):
     return _request("POST", "/household/create", {"name": name, "user_id": user_id})
+
 
 def join_household(invite_code, user_id):
     return _request("POST", "/household/join", {"invite_code": invite_code, "user_id": user_id})
 
+
 def get_user_households(user_id):
-    # used right after login to check what household(s) this user already belongs to
+    # used right after login to check what household(s) this user
+    # already belongs to. f-string builds the URL, so user_id 3 becomes
+    # "/user/3/households"
     return _request("GET", f"/user/{user_id}/households")
+
 
 def get_household(household_id):
     # used to look up a household's invite code again from the account screen
     return _request("GET", f"/household/{household_id}")
 
+
 def get_household_members(household_id):
     # used by the account screen to show who's in the household
     return _request("GET", f"/household/{household_id}/members")
+
 
 def get_user(user_id):
     # used by the account screen to show the logged-in user's own details
     return _request("GET", f"/user/{user_id}")
 
+
 def get_list(household_id):
+    # this is the function ListScreen calls on a repeating timer to
+    # poll for changes, as well as on demand when Refresh List is clicked
     return _request("GET", f"/household/{household_id}/list")
 
-def add_item(household_id, name, category, user_id):
+
+def add_item(household_id, name, category, user_id, confirm_duplicate=False):
+    # confirm_duplicate defaults to False, so a normal add always goes
+    # through the duplicate check on the server. only gets set to True
+    # when the user has already been asked and said "add it anyway"
     return _request("POST", f"/household/{household_id}/list", {
-        "name": name, "category": category, "user_id": user_id
+        "name": name, "category": category, "user_id": user_id,
+        "confirm_duplicate": confirm_duplicate
     })
+
 
 def set_checked_off(item_id, checked_off):
     return _request("PATCH", f"/list_item/{item_id}", {"checked_off": checked_off})
 
+
 def delete_item(item_id):
     return _request("DELETE", f"/list_item/{item_id}")
+
 
 def clear_checked_items(household_id):
     # removes every checked-off item for a household in one go

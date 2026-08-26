@@ -434,6 +434,26 @@ class ListScreen(tk.Frame):
 
         try:
             api_client.add_item(self.app.current_household_id, name, category, self.app.current_user_id)
+        except api_client.DuplicateItemError:
+            # something with this name is already active on the list,
+            # ask before adding a second copy rather than silently
+            # blocking it or silently allowing it
+            add_anyway = messagebox.askyesno(
+                "Already on the list",
+                f'"{name}" is already on the list. Add it again anyway?'
+            )
+            if not add_anyway:
+                return
+            try:
+                # confirm_duplicate=True tells the server to skip the
+                # duplicate check this time and add it regardless
+                api_client.add_item(
+                    self.app.current_household_id, name, category,
+                    self.app.current_user_id, confirm_duplicate=True
+                )
+            except api_client.ApiError as error:
+                messagebox.showerror("Error", str(error))
+                return
         except api_client.ApiError as error:
             messagebox.showerror("Error", str(error))
             return
