@@ -8,10 +8,9 @@ never has to deal with URLs or JSON directly.
 # importing modules
 import requests
 
-# the address of the flask server, only works if it's running on this
-# same device. if the server ever gets hosted somewhere else, this is
-# the only line that needs to change
-BASE_URL = "http://127.0.0.1:5000"
+# the address of the flask server. change this back to the localhost
+# address documented in README.md when testing with a local database
+BASE_URL = "https://ghwwater.pythonanywhere.com"
 
 # kept in memory after signup or login, then automatically included with
 # every later request so individual functions do not need to handle it

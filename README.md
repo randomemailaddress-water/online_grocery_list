@@ -63,15 +63,13 @@ Though, the two parts can still be started separately for development/testing by
 - Improved empty-list message that explains how to add the first item
 - Keyboard-friendly forms, including Enter to submit common actions
 
-## Planned
+## Online Deployment
 
-- **Online deployment:** host the Flask API so the app can be used between different computers without running the server locally
+The Flask backend is hosted at `https://ghwwater.pythonanywhere.com`. This lets separate computers use the same household lists without running the server locally.
 
-## Online Deployment Preparation
+The backend includes `wsgi.py`, which gives PythonAnywhere the Flask application without starting Flask's local development server. Debug mode is disabled, and the SQLite database path is based on the project folder so it works consistently when hosted.
 
-The backend includes `wsgi.py`, which gives a hosting service the Flask application without starting Flask's local development server. Debug mode is disabled, and the SQLite database path is based on the project folder so it works consistently when hosted.
-
-The local `grocery_list.db` file is excluded from Git. A fresh database should be created on the hosting service so test accounts and grocery data from the local version are not uploaded.
+The local `grocery_list.db` file is excluded from Git. The hosted version uses a separate database, so local test accounts and grocery data were not uploaded.
 
 For PythonAnywhere, the WSGI configuration needs to add this project folder to `sys.path` and import:
 
@@ -79,27 +77,19 @@ For PythonAnywhere, the WSGI configuration needs to add this project folder to `
 from wsgi import application
 ```
 
-The exact project path and website address depend on the PythonAnywhere username.
+The PythonAnywhere project folder is `/home/ghwwater/online_grocery_list`.
 
 ## Local / Online Server
 
-The application currently runs locally using:
+The application currently connects to the online server using:
 
 ```
-BASE_URL = "http://127.0.0.1:5000"
+BASE_URL = "https://ghwwater.pythonanywhere.com"
 ```
 
-This line is in `api_client.py`.
+This line is in `api_client.py`. Running `python run_local.py` detects the online address and opens the Tkinter application without starting a local server.
 
-When the Flask API is hosted online, this can be changed to the hosted HTTPS address, for example:
-
-```
-BASE_URL = "https://YOUR_USERNAME.pythonanywhere.com"
-```
-
-Running `python run_local.py` will detect the online address and open the same Tkinter application without starting a local server.
-
-The local version can still be used at any time by changing the line back to:
+Local operation can still be used at any time by changing it to:
 
 ```
 BASE_URL = "http://127.0.0.1:5000"
