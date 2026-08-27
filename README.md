@@ -9,7 +9,7 @@ A shared grocery list app for households. Multiple people in the same household 
 - **Database:** SQLite
 - **Syncing between devices:** polling the Flask API every few seconds
 
-The front end and back end are separate programs that talk to each other over HTTP. `app.py` needs to be running before `main.py` will work.
+The front end and back end are separate programs that talk to each other over HTTP. `run_local.py` starts everything needed for either local or online use.
 
 ## Setup
 
@@ -29,19 +29,16 @@ python database.py
 
 ## Running it
 
-Two terminals needed. If you're using a virtual environment, make sure it's activated in both.
-
-**Terminal 1**, start the server and leave it running:
+Start the local server and the Tkinter application together with:
 ```
-python app.py
+python run_local.py
 ```
 
-**Terminal 2**, start the actual app:
-```
-python main.py
-```
+When `BASE_URL` is local, the launcher starts Flask if it is not already running. This means `python run_local.py` can be run again to open another window for testing a different user. Keep the first window open until the other local windows are finished, since the first window owns the shared local server.
 
-To test it with more than one "person", run `python main.py` again in a third terminal and sign up as a different user.
+When `BASE_URL` points to an online server, the launcher does not start a local Flask server. It only opens the Tkinter application and connects it to the online address.
+
+Though, the two parts can still be started separately for development/testing by running `python app.py` first and then `python main.py` in another terminal.
 
 ## Version 3 (current)
 
@@ -79,7 +76,7 @@ BASE_URL = "http://127.0.0.1:5000"
 
 This line is in `api_client.py`.
 
-When the Flask API is eventually hosted online, this can be changed to the hosted server's address instead. The same Tkinter application can then communicate with the online server.
+When the Flask API is eventually hosted online, this can be changed to the hosted server's address instead. Running `python run_local.py` will detect the online address and open the same Tkinter application without starting a local server.
 
 The local version can still be used at any time by changing the line back to:
 

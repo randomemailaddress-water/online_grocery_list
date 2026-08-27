@@ -52,6 +52,12 @@ def user_is_member(conn, user_id, household_id):
     return member is not None
 
 
+# used by run_local.py to check whether this server is already running
+@app.route("/health", methods=["GET"])
+def health():
+    return jsonify({"status": "ok"}), 200
+
+
 # accounts
 # @app.route tells Flask "run this function when a request comes in for this URL"
 # methods=["POST"] means this only responds to POST requests, used for sending new data
