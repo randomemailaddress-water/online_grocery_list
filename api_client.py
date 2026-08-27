@@ -72,6 +72,18 @@ def login(email, password):
     return _request("POST", "/login", {"email": email, "password": password})
 
 
+def update_user(user_id, name=None, email=None, new_password=None, current_password=None):
+    # version 2 lets the user change their account details. the current
+    # password is sent as well so the server can check that it's really
+    # the account owner making the change
+    return _request("PATCH", f"/user/{user_id}", {
+        "name": name,
+        "email": email,
+        "new_password": new_password,
+        "current_password": current_password
+    })
+
+
 def create_household(name, user_id):
     return _request("POST", "/household/create", {"name": name, "user_id": user_id})
 
@@ -102,30 +114,64 @@ def get_user(user_id):
     return _request("GET", f"/user/{user_id}")
 
 
-def get_list(household_id):
+def leave_household(household_id, user_id):
+    # version 2 lets a user leave one household without deleting the
+    # household itself or affecting the other members
+    return _request("DELETE", f"/household/{household_id}/leave", {
+        "user_id": user_id
+    })
+
+
+def get_list(household_id, user_id):
     # this is the function ListScreen calls on a repeating timer to
-    # poll for changes, as well as on demand when Refresh List is clicked
-    return _request("GET", f"/household/{household_id}/list")
+    # poll for changes, as well as on demand when the list is first loaded
+    # the user id is included in the URL so the server can check household membership
+    return _request("GET", f"/household/{household_id}/list?user_id={user_id}")
 
-
-def add_item(household_id, name, category, user_id, confirm_duplicate=False):
+def add_item(household_id, name, category, quantity, user_id, confirm_duplicate=False):
     # confirm_duplicate defaults to False, so a normal add always goes
     # through the duplicate check on the server. only gets set to True
     # when the user has already been asked and said "add it anyway"
     return _request("POST", f"/household/{household_id}/list", {
-        "name": name, "category": category, "user_id": user_id,
+        "name": name,
+        "category": category,
+        "quantity": quantity,
+        "user_id": user_id,
         "confirm_duplicate": confirm_duplicate
     })
 
 
-def set_checked_off(item_id, checked_off):
-    return _request("PATCH", f"/list_item/{item_id}", {"checked_off": checked_off})
+def set_checked_off(item_id, checked_off, user_id):
+    # the user id is included so the server can make sure the item is
+    # part of a household that this user actually belongs to
+    return _request("PATCH", f"/list_item/{item_id}", {
+        "checked_off": checked_off,
+        "user_id": user_id
+    })
 
 
-def delete_item(item_id):
-    return _request("DELETE", f"/list_item/{item_id}")
+def update_quantity(item_id, quantity, user_id):
+    # quantity is stored separately from the item name in version 2,
+    # so it can be changed without replacing the whole grocery item
+    return _request("PATCH", f"/list_item/{item_id}", {
+        "quantity": quantity,
+        "user_id": user_id
+    })
 
 
-def clear_checked_items(household_id):
+def delete_item(item_id, user_id):
+    # the user id is sent with the delete request so the server can check
+    # that the user belongs to the item's household
+    return _request("DELETE", f"/list_item/{item_id}", {
+        "user_id": user_id
+    })
+
+
+def clear_checked_items(household_id, user_id):
     # removes every checked-off item for a household in one go
-    return _request("DELETE", f"/household/{household_id}/list/checked")
+    # the user id is also checked by the server before anything is deleted
+    return _request(
+        "DELETE",
+        f"/household/{household_id}/list/checked",
+        {"user_id": user_id}
+    )
