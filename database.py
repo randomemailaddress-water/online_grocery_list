@@ -60,6 +60,7 @@ def create_tables():
             household_id INTEGER NOT NULL,
             name TEXT NOT NULL,
             category TEXT DEFAULT 'Uncategorised',
+            quantity INTEGER DEFAULT 1,
             added_by INTEGER NOT NULL,
             checked_off INTEGER DEFAULT 0,
             created_at TEXT DEFAULT CURRENT_TIMESTAMP,
@@ -67,6 +68,15 @@ def create_tables():
             FOREIGN KEY (added_by) REFERENCES users (id)
         )
     """)
+
+    # version 2 adds quantities to grocery items. existing Version 1 databases won't have this column, so add it when upgrading instead of making the user delete their old database.
+    columns = cursor.execute("PRAGMA table_info(list_items)").fetchall()
+    column_names = [column["name"] for column in columns]
+
+    if "quantity" not in column_names:
+        cursor.execute(
+            "ALTER TABLE list_items ADD COLUMN quantity INTEGER DEFAULT 1"
+        )
 
     conn.commit()
     conn.close()
