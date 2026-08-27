@@ -43,7 +43,7 @@ python main.py
 
 To test it with more than one "person", run `python main.py` again in a third terminal and sign up as a different user.
 
-## Version 2 (current)
+## Version 3 (current)
 
 - Sign up / log in, signup logs you straight in
 - Email and password input validation
@@ -56,12 +56,17 @@ To test it with more than one "person", run `python main.py` again in a third te
 - Live syncing between users through automatic polling
 - Account screen: your details, household name, invite code, and who's in the household
 - Change your account name, email, or password
-- Version 2 has a redesigned interface compared with Version 1
 - Manual Refresh button removed because the list now updates automatically
+- Preset grocery categories with an editable search/filter field
+- Custom categories are still accepted when a preset does not fit
+- Redesigned interface with clearer headings, navigation, forms, and consistent controls
+- Cleaner grocery item rows with more noticeable quantities and added-by information
+- Checked items use a different background and strikethrough text
+- Improved empty-list message that explains how to add the first item
+- Keyboard-friendly forms, including Enter to submit common actions
 
 ## Planned
 
-- **Version 3:** preset categories, category quick-search, accessibility and usability improvements, and final UI polish
 - **Online deployment:** host the Flask API so the app can be used between different computers without running the server locally
 
 ## Local / Online Server
