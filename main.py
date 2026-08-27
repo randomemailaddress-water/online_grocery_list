@@ -35,6 +35,10 @@ FONT_HEADING = ("TkDefaultFont", 16, "bold")
 FONT_SUBHEADING = ("TkDefaultFont", 11, "bold")
 FONT_BODY = ("TkDefaultFont", 10)
 FONT_SMALL = ("TkDefaultFont", 9)
+
+# balances reasonably quick shared-list updates with the amount of work
+# being sent to the hosted server
+POLL_INTERVAL_MS = 2000
 FONT_BUTTON = ("TkDefaultFont", 10, "bold")
 
 # these are the most common categories, but the user can type a custom one if they want.
@@ -662,14 +666,14 @@ class ListScreen(tk.Frame):
         return "break"
 
     def start_polling(self):
-        # checks the server every 3 seconds for changes made by other
+        # checks the server every 2 seconds for changes made by other
         # household members, this is what makes the list feel "live"
-        self.poll_after_id = self.after(3000, self.poll)
+        self.poll_after_id = self.after(POLL_INTERVAL_MS, self.poll)
 
     def poll(self):
         self.load_items()
         # reschedules itself so it keeps repeating rather than firing once
-        self.poll_after_id = self.after(3000, self.poll)
+        self.poll_after_id = self.after(POLL_INTERVAL_MS, self.poll)
 
     def destroy(self):
         # cancels the polling job first, otherwise it fires later and

@@ -16,6 +16,10 @@ BASE_URL = "https://ghwwater.pythonanywhere.com"
 # every later request so individual functions do not need to handle it
 AUTH_TOKEN = None
 
+# reuse the same connection for later requests instead of repeating the
+# full online connection setup every time the list polls
+REQUEST_SESSION = requests.Session()
+
 
 class ApiError(Exception):
     # raised any time something goes wrong talking to the server,
@@ -33,7 +37,7 @@ class DuplicateItemError(ApiError):
 
 
 def _request(method, path, json_data=None):
-    # the one place that actually calls requests.request(). every
+    # the one place that actually sends an HTTP request. every
     # function below goes through this, so connection problems only
     # need to be handled here instead of in every single function
     url = f"{BASE_URL}{path}"
@@ -41,7 +45,7 @@ def _request(method, path, json_data=None):
     if AUTH_TOKEN:
         headers["Authorization"] = f"Bearer {AUTH_TOKEN}"
     try:
-        response = requests.request(
+        response = REQUEST_SESSION.request(
             method, url, json=json_data, headers=headers, timeout=5
         )
     except requests.exceptions.ConnectionError:
