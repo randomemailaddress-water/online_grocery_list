@@ -160,26 +160,31 @@ class CategoryCombobox(ttk.Combobox):
             "Up", "Down", "Left", "Right", "Return", "Escape", "Tab"
         ):
             return
-        typed_category = self.get().strip().lower()
+        typed_category = self.get().strip()
         matching_categories = [
             category for category in PRESET_CATEGORIES
-            if typed_category in category.lower()
+            if typed_category.lower() in category.lower()
         ]
         self.configure(values=matching_categories)
-        # filtering the values alone still makes the user click the arrow
-        # to discover the result, open the suggestions automatically so
-        # typing "per" visibly suggests "Personal Care"
-        try:
-            dropdown = self.tk.call("ttk::combobox::PopdownWindow", self)
-            dropdown_is_open = bool(int(self.tk.call("winfo", "viewable", dropdown)))
-        except tk.TclError:
-            dropdown_is_open = False
-        if typed_category and matching_categories and not dropdown_is_open:
-            self.event_generate("<Alt-Down>")
-        elif not matching_categories and dropdown_is_open:
-            # no preset match means the text is a custom category, so
-            # close the empty suggestion list without changing what was typed
-            self.event_generate("<Escape>")
+        # opening the normal dropdown while typing makes Windows send later
+        # letters to the list instead of this entry. show a prefix match
+        # inside the entry instead and select the suggested ending, so the
+        # next typed letter replaces it naturally
+        can_complete = event is None or event.keysym not in ("BackSpace", "Delete")
+        prefix_match = next(
+            (
+                category for category in matching_categories
+                if category.lower().startswith(typed_category.lower())
+            ),
+            None
+        )
+        if (
+            can_complete and typed_category and prefix_match is not None
+            and prefix_match != typed_category
+        ):
+            self.set(prefix_match)
+            self.icursor(len(typed_category))
+            self.select_range(len(typed_category), tk.END)
 
     def _category_selected(self, event=None):
         self.placeholder_showing = False
