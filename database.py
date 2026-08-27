@@ -7,9 +7,12 @@ all the tables
 """
 
 # importing modules
+from pathlib import Path
 import sqlite3
 
-DB_NAME = "grocery_list.db"
+# using the folder this file is stored in makes sure local and hosted
+# versions find the same database even when started from another folder
+DB_NAME = Path(__file__).resolve().parent / "grocery_list.db"
 
 def get_connection():
     # opens a connection to the database.

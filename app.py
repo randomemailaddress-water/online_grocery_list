@@ -725,7 +725,6 @@ def clear_checked_items(household_id):
 
 
 if __name__ == "__main__":
-    # use_reloader=False avoids a known Windows bug where Flask's
-    # auto-restart-on-save feature throws a socket error when the*
-    # server stops. debug=True is still on so errors are still easy to read
-    app.run(debug=True, use_reloader=False)
+    # this only runs when app.py is started directly for local testing.
+    # hosted versions import app through wsgi.py instead
+    app.run(debug=False, use_reloader=False)
