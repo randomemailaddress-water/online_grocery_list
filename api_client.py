@@ -13,6 +13,10 @@ import requests
 # the only line that needs to change
 BASE_URL = "http://127.0.0.1:5000"
 
+# kept in memory after signup or login, then automatically included with
+# every later request so individual functions do not need to handle it
+AUTH_TOKEN = None
+
 
 class ApiError(Exception):
     # raised any time something goes wrong talking to the server,
@@ -34,8 +38,13 @@ def _request(method, path, json_data=None):
     # function below goes through this, so connection problems only
     # need to be handled here instead of in every single function
     url = f"{BASE_URL}{path}"
+    headers = {}
+    if AUTH_TOKEN:
+        headers["Authorization"] = f"Bearer {AUTH_TOKEN}"
     try:
-        response = requests.request(method, url, json=json_data, timeout=5)
+        response = requests.request(
+            method, url, json=json_data, headers=headers, timeout=5
+        )
     except requests.exceptions.ConnectionError:
         raise ApiError("Can't reach the server. Is app.py running?")
     except requests.exceptions.Timeout:
@@ -65,11 +74,17 @@ def signup(name, email, password):
     # every function below follows the same shape: build a dictionary of
     # whatever needs to go to the server, hand it to _request() along
     # with the HTTP method and URL
-    return _request("POST", "/signup", {"name": name, "email": email, "password": password})
+    global AUTH_TOKEN
+    result = _request("POST", "/signup", {"name": name, "email": email, "password": password})
+    AUTH_TOKEN = result["token"]
+    return result
 
 
 def login(email, password):
-    return _request("POST", "/login", {"email": email, "password": password})
+    global AUTH_TOKEN
+    result = _request("POST", "/login", {"email": email, "password": password})
+    AUTH_TOKEN = result["token"]
+    return result
 
 
 def update_user(user_id, name=None, email=None, new_password=None, current_password=None):
@@ -84,12 +99,12 @@ def update_user(user_id, name=None, email=None, new_password=None, current_passw
     })
 
 
-def create_household(name, user_id):
-    return _request("POST", "/household/create", {"name": name, "user_id": user_id})
+def create_household(name):
+    return _request("POST", "/household/create", {"name": name})
 
 
-def join_household(invite_code, user_id):
-    return _request("POST", "/household/join", {"invite_code": invite_code, "user_id": user_id})
+def join_household(invite_code):
+    return _request("POST", "/household/join", {"invite_code": invite_code})
 
 
 def get_user_households(user_id):
@@ -114,21 +129,19 @@ def get_user(user_id):
     return _request("GET", f"/user/{user_id}")
 
 
-def leave_household(household_id, user_id):
+def leave_household(household_id):
     # version 2 lets a user leave one household without deleting the
     # household itself or affecting the other members
-    return _request("DELETE", f"/household/{household_id}/leave", {
-        "user_id": user_id
-    })
+    return _request("DELETE", f"/household/{household_id}/leave")
 
 
-def get_list(household_id, user_id):
+def get_list(household_id):
     # this is the function ListScreen calls on a repeating timer to
     # poll for changes, as well as on demand when the list is first loaded
-    # the user id is included in the URL so the server can check household membership
-    return _request("GET", f"/household/{household_id}/list?user_id={user_id}")
+    # the login token tells the server which user is requesting the list
+    return _request("GET", f"/household/{household_id}/list")
 
-def add_item(household_id, name, category, quantity, user_id, confirm_duplicate=False):
+def add_item(household_id, name, category, quantity, confirm_duplicate=False):
     # confirm_duplicate defaults to False, so a normal add always goes
     # through the duplicate check on the server. only gets set to True
     # when the user has already been asked and said "add it anyway"
@@ -136,42 +149,32 @@ def add_item(household_id, name, category, quantity, user_id, confirm_duplicate=
         "name": name,
         "category": category,
         "quantity": quantity,
-        "user_id": user_id,
         "confirm_duplicate": confirm_duplicate
     })
 
 
-def set_checked_off(item_id, checked_off, user_id):
-    # the user id is included so the server can make sure the item is
-    # part of a household that this user actually belongs to
+def set_checked_off(item_id, checked_off):
+    # the authentication token is checked before the item can be changed
     return _request("PATCH", f"/list_item/{item_id}", {
-        "checked_off": checked_off,
-        "user_id": user_id
+        "checked_off": checked_off
     })
 
 
-def update_quantity(item_id, quantity, user_id):
+def update_quantity(item_id, quantity):
     # quantity is stored separately from the item name in version 2,
     # so it can be changed without replacing the whole grocery item
     return _request("PATCH", f"/list_item/{item_id}", {
-        "quantity": quantity,
-        "user_id": user_id
+        "quantity": quantity
     })
 
 
-def delete_item(item_id, user_id):
-    # the user id is sent with the delete request so the server can check
-    # that the user belongs to the item's household
-    return _request("DELETE", f"/list_item/{item_id}", {
-        "user_id": user_id
-    })
+def delete_item(item_id):
+    # the token is used to check that the logged-in user belongs to the
+    # item's household before it is removed
+    return _request("DELETE", f"/list_item/{item_id}")
 
 
-def clear_checked_items(household_id, user_id):
+def clear_checked_items(household_id):
     # removes every checked-off item for a household in one go
-    # the user id is also checked by the server before anything is deleted
-    return _request(
-        "DELETE",
-        f"/household/{household_id}/list/checked",
-        {"user_id": user_id}
-    )
+    # the token is checked by the server before anything is deleted
+    return _request("DELETE", f"/household/{household_id}/list/checked")

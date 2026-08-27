@@ -7,11 +7,12 @@ own first (python app.py) before starting main.py.
 """
 
 # importing modules
+from functools import wraps
 import re
 import secrets
 import string
 
-from flask import Flask, request, jsonify
+from flask import Flask, request, jsonify, g
 from werkzeug.security import generate_password_hash, check_password_hash
 from database import get_connection, create_tables
 
@@ -50,6 +51,42 @@ def user_is_member(conn, user_id, household_id):
         (user_id, household_id),
     ).fetchone()
     return member is not None
+
+
+def create_auth_token(conn, user_id):
+    # token_urlsafe creates a long unpredictable value that is much harder
+    # to guess than the user's small database id
+    token = secrets.token_urlsafe(32)
+    conn.execute(
+        "INSERT INTO auth_tokens (user_id, token) VALUES (?, ?)",
+        (user_id, token),
+    )
+    return token
+
+
+def login_required(route):
+    # this decorator runs before a protected route and makes the authenticated
+    # user id available as g.user_id for the rest of that request
+    @wraps(route)
+    def protected_route(*args, **kwargs):
+        auth_header = request.headers.get("Authorization", "")
+        if not auth_header.startswith("Bearer "):
+            return jsonify({"error": "Log in to continue"}), 401
+
+        token = auth_header.removeprefix("Bearer ").strip()
+        conn = get_connection()
+        auth_token = conn.execute(
+            "SELECT user_id FROM auth_tokens WHERE token = ?", (token,)
+        ).fetchone()
+        conn.close()
+
+        if auth_token is None:
+            return jsonify({"error": "Your login is no longer valid. Log in again"}), 401
+
+        g.user_id = auth_token["user_id"]
+        return route(*args, **kwargs)
+
+    return protected_route
 
 
 # used by run_local.py to check whether this server is already running
@@ -106,9 +143,10 @@ def signup():
             "INSERT INTO users (name, email, password_hash) VALUES (?, ?, ?)",
             (name, email, password_hash),
         )
-        conn.commit()
         # lastrowid gives back the auto-generated id of the row we just inserted
         user_id = cursor.lastrowid
+        auth_token = create_auth_token(conn, user_id)
+        conn.commit()
     except Exception:
         # this fails if the email is already used, since email is
         # marked UNIQUE in the users table
@@ -118,7 +156,7 @@ def signup():
     conn.close()
     # 201 means "created", the standard status code for a successful POST
     # that made a new thing
-    return jsonify({"user_id": user_id, "name": name}), 201
+    return jsonify({"user_id": user_id, "name": name, "token": auth_token}), 201
 
 
 @app.route("/login", methods=["POST"])
@@ -133,22 +171,29 @@ def login():
 
     conn = get_connection()
     user = conn.execute("SELECT * FROM users WHERE email = ?", (email,)).fetchone()
-    conn.close()
 
     # check_password_hash compares the typed password against the stored
     # hash without ever un-hashing anything
     if user is None or not check_password_hash(user["password_hash"], password):
         # deliberately doesn't say which part was wrong (email or
         # password), confirming an email exists is a small info leak
+        conn.close()
         return jsonify({"error": "Incorrect email or password"}), 401
 
-    # version 2 still keeps this simple, the client just remembers the user_id
-    # after logging in and sends it with later requests, no session token yet
-    return jsonify({"user_id": user["id"], "name": user["name"]}), 200
+    auth_token = create_auth_token(conn, user["id"])
+    conn.commit()
+    conn.close()
+
+    return jsonify({
+        "user_id": user["id"], "name": user["name"], "token": auth_token
+    }), 200
 
 
 @app.route("/user/<int:user_id>", methods=["GET"])
+@login_required
 def get_user(user_id):
+    if user_id != g.user_id:
+        return jsonify({"error": "You cannot access another user's account"}), 403
     # returns a single user's own name and email, used by the Account screen
     conn = get_connection()
     user = conn.execute(
@@ -164,7 +209,10 @@ def get_user(user_id):
 
 
 @app.route("/user/<int:user_id>", methods=["PATCH"])
+@login_required
 def update_user(user_id):
+    if user_id != g.user_id:
+        return jsonify({"error": "You cannot change another user's account"}), 403
     # PATCH means "update part of this", so the client only needs to send
     # the account details the user actually wants to change
     data = request.get_json()
@@ -263,13 +311,14 @@ def update_user(user_id):
 # households
 
 @app.route("/household/create", methods=["POST"])
+@login_required
 def create_household():
     data = request.get_json()
     name = data.get("name")
-    user_id = data.get("user_id")
+    user_id = g.user_id
 
-    if not name or not user_id:
-        return jsonify({"error": "name and user_id are required"}), 400
+    if not name:
+        return jsonify({"error": "Household name is required"}), 400
 
     name = name.strip()
     if not name:
@@ -302,13 +351,14 @@ def create_household():
 
 
 @app.route("/household/join", methods=["POST"])
+@login_required
 def join_household():
     data = request.get_json()
     invite_code = data.get("invite_code")
-    user_id = data.get("user_id")
+    user_id = g.user_id
 
-    if not invite_code or not user_id:
-        return jsonify({"error": "invite code and user_id are required"}), 400
+    if not invite_code:
+        return jsonify({"error": "Invite code is required"}), 400
 
     # invite codes are shown in uppercase, so convert the entered version
     # to uppercase as well so typing abc123 still works as ABC123
@@ -343,7 +393,10 @@ def join_household():
 
 
 @app.route("/user/<int:user_id>/households", methods=["GET"])
+@login_required
 def get_user_households(user_id):
+    if user_id != g.user_id:
+        return jsonify({"error": "You cannot access another user's households"}), 403
     # <int:user_id> in the route is a URL parameter, Flask pulls the
     # number straight out of the URL and passes it in here
     # returns every household this user belongs to, used right after
@@ -367,10 +420,15 @@ def get_user_households(user_id):
 
 
 @app.route("/household/<int:household_id>", methods=["GET"])
+@login_required
 def get_household(household_id):
     # returns one household's own details (name + invite code), used by
     # the Account screen so the invite code can be looked up again later
     conn = get_connection()
+    if not user_is_member(conn, g.user_id, household_id):
+        conn.close()
+        return jsonify({"error": "You are not a member of this household"}), 403
+
     household = conn.execute(
         "SELECT id, name, invite_code FROM households WHERE id = ?",
         (household_id,),
@@ -384,9 +442,14 @@ def get_household(household_id):
 
 
 @app.route("/household/<int:household_id>/members", methods=["GET"])
+@login_required
 def get_household_members(household_id):
     # returns everyone in a household, used by the Account screen
     conn = get_connection()
+    if not user_is_member(conn, g.user_id, household_id):
+        conn.close()
+        return jsonify({"error": "You are not a member of this household"}), 403
+
     members = conn.execute(
         """
         SELECT users.id, users.name, users.email
@@ -404,14 +467,11 @@ def get_household_members(household_id):
 
 
 @app.route("/household/<int:household_id>/leave", methods=["DELETE"])
+@login_required
 def leave_household(household_id):
     # version 2 lets a user leave a household without deleting the
     # household itself or affecting the other members
-    data = request.get_json()
-    user_id = data.get("user_id")
-
-    if not user_id:
-        return jsonify({"error": "user_id is required"}), 400
+    user_id = g.user_id
 
     conn = get_connection()
 
@@ -439,15 +499,15 @@ def leave_household(household_id):
 # grocery list
 
 @app.route("/household/<int:household_id>/list", methods=["GET"])
+@login_required
 def get_list(household_id):
-    # the client sends the current user id so the server can check that
-    # the person asking for the list actually belongs to this household
-
-    user_id = request.args.get("user_id", type=int)
+    # the authenticated user must belong to the household before the
+    # shared list is returned
+    user_id = g.user_id
 
     conn = get_connection()
 
-    if not user_id or not user_is_member(conn, user_id, household_id):
+    if not user_is_member(conn, user_id, household_id):
         conn.close()
         return jsonify({"error": "You are not a member of this household"}), 403
     # JOIN combines rows from two tables, list_items doesn't store the
@@ -471,6 +531,7 @@ def get_list(household_id):
 
 
 @app.route("/household/<int:household_id>/list", methods=["POST"])
+@login_required
 def add_item(household_id):
     data = request.get_json()
     name = data.get("name")
@@ -478,14 +539,14 @@ def add_item(household_id):
     # inserting an empty string
     category = data.get("category", "Uncategorised")
     quantity = data.get("quantity", 1)
-    added_by = data.get("user_id")
+    added_by = g.user_id
     # this flag lets the Tkinter client say "yes, I know it's a
     # duplicate, add it anyway", defaults to False so a normal add
     # always gets the duplicate check
     confirm_duplicate = data.get("confirm_duplicate", False)
 
-    if not name or not added_by:
-        return jsonify({"error": "name and user_id are required"}), 400
+    if not name:
+        return jsonify({"error": "Item name is required"}), 400
 
     name = name.strip()
     category = category.strip() or "Uncategorised"
@@ -547,15 +608,13 @@ def add_item(household_id):
 
 
 @app.route("/list_item/<int:item_id>", methods=["PATCH"])
+@login_required
 def update_item(item_id):
     # PATCH means "update part of this", so only touch the fields that
     # were actually sent in the request, rather than requiring the
     # whole item again
     data = request.get_json()
-    user_id = data.get("user_id")
-
-    if not user_id:
-        return jsonify({"error": "user_id is required"}), 400
+    user_id = g.user_id
 
     conn = get_connection()
 
@@ -612,15 +671,10 @@ def update_item(item_id):
 
 
 @app.route("/list_item/<int:item_id>", methods=["DELETE"])
+@login_required
 def delete_item(item_id):
-    # the user id is sent with the request so the server can check that
-    # this item belongs to a household the user is actually part of
-
-    data = request.get_json()
-    user_id = data.get("user_id")
-
-    if not user_id:
-        return jsonify({"error": "user_id is required"}), 400
+    # the authenticated user still needs to belong to the item's household
+    user_id = g.user_id
 
     conn = get_connection()
 
@@ -645,16 +699,13 @@ def delete_item(item_id):
 
 
 @app.route("/household/<int:household_id>/list/checked", methods=["DELETE"])
+@login_required
 def clear_checked_items(household_id):
     # deletes every checked-off item for a household in one go, instead
     # of the Tkinter side calling delete_item() in a loop for each one,
     # one database operation is quicker and can't leave the list
     # half-cleared if something interrupts it partway through
-    data = request.get_json()
-    user_id = data.get("user_id")
-
-    if not user_id:
-        return jsonify({"error": "user_id is required"}), 400
+    user_id = g.user_id
 
     conn = get_connection()
 

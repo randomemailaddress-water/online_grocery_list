@@ -33,6 +33,18 @@ def create_tables():
         )
     """)
 
+    # each login creates a random token linked to that user. the client sends
+    # this token with later requests so a user id cannot just be copied or guessed.
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS auth_tokens (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL,
+            token TEXT NOT NULL UNIQUE,
+            created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (user_id) REFERENCES users (id)
+        )
+    """)
+
     # one row per household. each household has a unique invite code that can be used to join it.
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS households (

@@ -507,7 +507,7 @@ class HouseholdScreen(tk.Frame):
             self.status_label.config(text="Enter a household name")
             return
         try:
-            result = api_client.create_household(name, self.app.current_user_id)
+            result = api_client.create_household(name)
         except api_client.ApiError as error:
             self.status_label.config(text=str(error))
             return
@@ -530,7 +530,7 @@ class HouseholdScreen(tk.Frame):
             self.status_label.config(text="Enter an invite code")
             return
         try:
-            result = api_client.join_household(code, self.app.current_user_id)
+            result = api_client.join_household(code)
         except api_client.ApiError as error:
             self.status_label.config(text=str(error))
             return
@@ -681,7 +681,7 @@ class ListScreen(tk.Frame):
 
     def load_items(self):
         try:
-            result = api_client.get_list(self.app.current_household_id, self.app.current_user_id)
+            result = api_client.get_list(self.app.current_household_id)
         except api_client.ApiError as error:
             self.last_items = None
             for widget in self.list_frame.winfo_children():
@@ -788,7 +788,7 @@ class ListScreen(tk.Frame):
             messagebox.showwarning("Invalid Quantity", "Quantity must be at least 1.")
             return
         try:
-            api_client.add_item(self.app.current_household_id, name, category, quantity, self.app.current_user_id)
+            api_client.add_item(self.app.current_household_id, name, category, quantity)
         except api_client.DuplicateItemError:
             # something with this name is already active on the list,
             # ask before adding a second copy
@@ -801,7 +801,7 @@ class ListScreen(tk.Frame):
                 # confirm_duplicate=True tells the server to skip the check this time
                 api_client.add_item(
                     self.app.current_household_id, name, category, quantity,
-                    self.app.current_user_id, confirm_duplicate=True
+                    confirm_duplicate=True
                 )
             except api_client.ApiError as error:
                 messagebox.showerror("Error", str(error))
@@ -820,7 +820,7 @@ class ListScreen(tk.Frame):
 
     def handle_toggle(self, item_id, checked_var):
         try:
-            api_client.set_checked_off(item_id, checked_var.get(), self.app.current_user_id)
+            api_client.set_checked_off(item_id, checked_var.get())
         except api_client.ApiError as error:
             # put the checkbox back if the server rejected the change,
             # otherwise it would look saved even though it was not
@@ -832,7 +832,7 @@ class ListScreen(tk.Frame):
 
     def handle_remove(self, item_id):
         try:
-            api_client.delete_item(item_id, self.app.current_user_id)
+            api_client.delete_item(item_id)
         except api_client.ApiError as error:
             messagebox.showerror("Error", str(error))
             return
@@ -843,7 +843,7 @@ class ListScreen(tk.Frame):
         if not messagebox.askyesno("Clear Checked Items", "Remove every checked-off item from the list?"):
             return
         try:
-            api_client.clear_checked_items(self.app.current_household_id, self.app.current_user_id)
+            api_client.clear_checked_items(self.app.current_household_id)
         except api_client.ApiError as error:
             messagebox.showerror("Error", str(error))
             return
@@ -961,7 +961,7 @@ class AccountScreen(tk.Frame):
         ):
             return
         try:
-            api_client.leave_household(self.app.current_household_id, self.app.current_user_id)
+            api_client.leave_household(self.app.current_household_id)
         except api_client.ApiError as error:
             messagebox.showerror("Error", str(error))
             return

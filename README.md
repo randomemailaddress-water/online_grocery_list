@@ -44,6 +44,7 @@ Though, the two parts can still be started separately for development/testing by
 
 - Sign up / log in, signup logs you straight in
 - Email and password input validation
+- Session-token authentication protects account, household, and list requests
 - Create a household or join one with an invite code
 - Belong to multiple households and switch between them
 - Leave a household without deleting it for the other members
