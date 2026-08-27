@@ -1003,31 +1003,33 @@ class EditAccountScreen(tk.Frame):
             font=FONT_BODY, bg=COLOR_BACKGROUND, fg=COLOR_MUTED
         ).pack(pady=(0, 16))
         form = make_card(self)
-        form.pack(pady=5, padx=100, ipadx=24, ipady=20)
+        form.pack(pady=5, padx=100)
         tk.Label(form, text="Name", font=FONT_BODY, bg=COLOR_CARD, fg=COLOR_TEXT).grid(
-            row=0, column=0, sticky="w", pady=(0, 4)
+            row=0, column=0, sticky="w", padx=24, pady=(20, 4)
         )
         self.name_entry = make_entry(form, width=38)
         self.name_entry.insert(0, self.app.current_user_name)
-        self.name_entry.grid(row=1, column=0, pady=(0, 12), ipady=5)
+        self.name_entry.grid(row=1, column=0, padx=24, pady=(0, 12), ipady=5)
         tk.Label(form, text="Email", font=FONT_BODY, bg=COLOR_CARD, fg=COLOR_TEXT).grid(
-            row=2, column=0, sticky="w", pady=(0, 4)
+            row=2, column=0, sticky="w", padx=24, pady=(0, 4)
         )
         self.email_entry = make_entry(form, width=38)
         self.email_entry.insert(0, self.app.current_user_email)
-        self.email_entry.grid(row=3, column=0, pady=(0, 12), ipady=5)
+        self.email_entry.grid(row=3, column=0, padx=24, pady=(0, 12), ipady=5)
         tk.Label(
             form, text="New password (leave blank to keep current)",
             font=FONT_BODY, bg=COLOR_CARD, fg=COLOR_TEXT
-        ).grid(row=4, column=0, sticky="w", pady=(0, 4))
+        ).grid(row=4, column=0, sticky="w", padx=24, pady=(0, 4))
         self.new_password_entry = make_entry(form, width=38, show="*")
-        self.new_password_entry.grid(row=5, column=0, pady=(0, 12), ipady=5)
+        self.new_password_entry.grid(row=5, column=0, padx=24, pady=(0, 12), ipady=5)
         tk.Label(form, text="Current password", font=FONT_BODY, bg=COLOR_CARD, fg=COLOR_TEXT).grid(
-            row=6, column=0, sticky="w", pady=(0, 4)
+            row=6, column=0, sticky="w", padx=24, pady=(0, 4)
         )
         self.current_password_entry = make_entry(form, width=38, show="*")
-        self.current_password_entry.grid(row=7, column=0, pady=(0, 16), ipady=5)
-        make_button(form, "Save Changes", self.handle_save).grid(row=8, column=0, sticky="ew")
+        self.current_password_entry.grid(row=7, column=0, padx=24, pady=(0, 16), ipady=5)
+        make_button(form, "Save Changes", self.handle_save).grid(
+            row=8, column=0, sticky="ew", padx=24, pady=(0, 20)
+        )
         self.status_label = tk.Label(
             self, text="", font=FONT_BODY, bg=COLOR_BACKGROUND,
             fg=COLOR_DANGER, wraplength=480
