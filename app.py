@@ -7,12 +7,12 @@ own first (python app.py) before starting main.py.
 """
 
 # importing modules
+import re
 import secrets
 import string
 
 from flask import Flask, request, jsonify
 from werkzeug.security import generate_password_hash, check_password_hash
-
 from database import get_connection, create_tables
 
 # this is the actual Flask application object, every route below gets
@@ -36,8 +36,23 @@ def generate_invite_code(length=6):
     return "".join(secrets.choice(characters) for _ in range(length))
 
 
-# accounts
+def valid_email(email):
+    # this checks for the basic structure of an email address. it isn't
+    # trying to prove the email actually exists, just catching obvious mistakes
+    return re.fullmatch(r"[^@\s]+@[^@\s]+\.[^@\s]+", email) is not None
 
+
+def user_is_member(conn, user_id, household_id):
+    # used by the household/list routes to check that the user actually
+    # belongs to the household they're trying to access
+    member = conn.execute(
+        "SELECT id FROM household_members WHERE user_id = ? AND household_id = ?",
+        (user_id, household_id),
+    ).fetchone()
+    return member is not None
+
+
+# accounts
 # @app.route tells Flask "run this function when a request comes in for this URL"
 # methods=["POST"] means this only responds to POST requests, used for sending new data
 @app.route("/signup", methods=["POST"])
@@ -52,6 +67,18 @@ def signup():
     # basic check that nothing was left empty
     if not name or not email or not password:
         return jsonify({"error": "name, email, and password are all required"}), 400
+
+    name = name.strip()
+    email = email.strip().lower()
+
+    # reject names that are technically there but only contain spaces
+    if not name:
+        return jsonify({"error": "Name cannot be empty"}), 400
+
+    # check the email before trying to create the account, so something like
+    # "hello" doesn't get accepted as if it were a real email address
+    if not valid_email(email):
+        return jsonify({"error": "Enter a valid email address"}), 400
 
     # reject passwords that are too short, this is what gives us an
     # actual boundary to test (7 characters should fail, 8 should pass)
@@ -93,6 +120,10 @@ def login():
     data = request.get_json()
     email = data.get("email")
     password = data.get("password")
+    if not email or not password:
+        return jsonify({"error": "Email and password are required"}), 400
+
+    email = email.strip().lower()
 
     conn = get_connection()
     user = conn.execute("SELECT * FROM users WHERE email = ?", (email,)).fetchone()
@@ -105,10 +136,122 @@ def login():
         # password), confirming an email exists is a small info leak
         return jsonify({"error": "Incorrect email or password"}), 401
 
-    # version 1 keeps this simple, the client just remembers the user_id
-    # after logging in and sends it with later requests, no session
-    # token yet, this is a known simplification
+    # version 2 still keeps this simple, the client just remembers the user_id
+    # after logging in and sends it with later requests, no session token yet
     return jsonify({"user_id": user["id"], "name": user["name"]}), 200
+
+
+@app.route("/user/<int:user_id>", methods=["GET"])
+def get_user(user_id):
+    # returns a single user's own name and email, used by the Account screen
+    conn = get_connection()
+    user = conn.execute(
+        "SELECT id, name, email FROM users WHERE id = ?", (user_id,)
+    ).fetchone()
+
+    conn.close()
+
+    if user is None:
+        return jsonify({"error": "User not found"}), 404
+
+    return jsonify(dict(user)), 200
+
+
+@app.route("/user/<int:user_id>", methods=["PATCH"])
+def update_user(user_id):
+    # PATCH means "update part of this", so the client only needs to send
+    # the account details the user actually wants to change
+    data = request.get_json()
+
+    name = data.get("name")
+    email = data.get("email")
+    new_password = data.get("new_password")
+    current_password = data.get("current_password")
+
+    # changing account details requires the current password first, so
+    # someone using an already logged-in computer can't change the account
+    # without knowing the existing password
+    if not current_password:
+        return jsonify({"error": "Current password is required"}), 400
+
+    conn = get_connection()
+
+    user = conn.execute(
+        "SELECT * FROM users WHERE id = ?", (user_id,)
+    ).fetchone()
+
+    if user is None:
+        conn.close()
+        return jsonify({"error": "User not found"}), 404
+
+    # check_password_hash works against the existing stored hash, so the
+    # current password is never stored or compared as plain text
+    if not check_password_hash(user["password_hash"], current_password):
+        conn.close()
+        return jsonify({"error": "Current password is incorrect"}), 401
+
+    if name is not None:
+        name = name.strip()
+
+        # an account name shouldn't be allowed to become completely blank
+        if not name:
+            conn.close()
+            return jsonify({"error": "Name cannot be empty"}), 400
+
+    if email is not None:
+        email = email.strip().lower()
+
+        # use the same email validation as signup, so changing an account
+        # can't bypass the validation that creating one has
+        if not valid_email(email):
+            conn.close()
+            return jsonify({"error": "Enter a valid email address"}), 400
+
+    if new_password is not None and new_password != "":
+        # the new password has to follow the same minimum length rule
+        # as a password entered during signup
+        if len(new_password) < MIN_PASSWORD_LENGTH:
+            conn.close()
+            return jsonify({"error": f"Password must be at least {MIN_PASSWORD_LENGTH} characters long"}), 400
+
+    try:
+        if name is not None:
+            conn.execute(
+                "UPDATE users SET name = ? WHERE id = ?",
+                (name, user_id),
+            )
+
+        if email is not None:
+            conn.execute(
+                "UPDATE users SET email = ? WHERE id = ?",
+                (email, user_id),
+            )
+
+        if new_password:
+            # password changes are hashed in exactly the same way as signup,
+            # so the new password is never stored as plain text either
+            password_hash = generate_password_hash(new_password)
+
+            conn.execute(
+                "UPDATE users SET password_hash = ? WHERE id = ?",
+                (password_hash, user_id),
+            )
+
+        conn.commit()
+
+    except Exception:
+        # this will normally only happen when the new email is already being
+        # used by another account, since email is marked UNIQUE in the database
+        conn.close()
+        return jsonify({"error": "That email is already registered"}), 409
+
+    updated_user = conn.execute(
+        "SELECT id, name, email FROM users WHERE id = ?", (user_id,)
+    ).fetchone()
+
+    conn.close()
+
+    return jsonify(dict(updated_user)), 200
 
 
 # households
@@ -121,6 +264,10 @@ def create_household():
 
     if not name or not user_id:
         return jsonify({"error": "name and user_id are required"}), 400
+
+    name = name.strip()
+    if not name:
+        return jsonify({"error": "Household name cannot be empty"}), 400
 
     invite_code = generate_invite_code()
 
@@ -154,6 +301,13 @@ def join_household():
     invite_code = data.get("invite_code")
     user_id = data.get("user_id")
 
+    if not invite_code or not user_id:
+        return jsonify({"error": "invite code and user_id are required"}), 400
+
+    # invite codes are shown in uppercase, so convert the entered version
+    # to uppercase as well so typing abc123 still works as ABC123
+    invite_code = invite_code.strip().upper()
+
     conn = get_connection()
     household = conn.execute(
         "SELECT * FROM households WHERE invite_code = ?", (invite_code,)
@@ -186,7 +340,6 @@ def join_household():
 def get_user_households(user_id):
     # <int:user_id> in the route is a URL parameter, Flask pulls the
     # number straight out of the URL and passes it in here
-
     # returns every household this user belongs to, used right after
     # login to skip straight to the list instead of asking them to join again
     conn = get_connection()
@@ -210,7 +363,7 @@ def get_user_households(user_id):
 @app.route("/household/<int:household_id>", methods=["GET"])
 def get_household(household_id):
     # returns one household's own details (name + invite code), used by
-    # the account screen so the invite code can be looked up again later
+    # the Account screen so the invite code can be looked up again later
     conn = get_connection()
     household = conn.execute(
         "SELECT id, name, invite_code FROM households WHERE id = ?",
@@ -226,7 +379,7 @@ def get_household(household_id):
 
 @app.route("/household/<int:household_id>/members", methods=["GET"])
 def get_household_members(household_id):
-    # returns everyone in a household, used by the account screen
+    # returns everyone in a household, used by the Account screen
     conn = get_connection()
     members = conn.execute(
         """
@@ -244,33 +397,60 @@ def get_household_members(household_id):
     return jsonify({"members": members_list}), 200
 
 
-@app.route("/user/<int:user_id>", methods=["GET"])
-def get_user(user_id):
-    # returns one user's own name/email, used by the account screen
+@app.route("/household/<int:household_id>/leave", methods=["DELETE"])
+def leave_household(household_id):
+    # version 2 lets a user leave a household without deleting the
+    # household itself or affecting the other members
+    data = request.get_json()
+    user_id = data.get("user_id")
+
+    if not user_id:
+        return jsonify({"error": "user_id is required"}), 400
+
     conn = get_connection()
-    user = conn.execute(
-        "SELECT id, name, email FROM users WHERE id = ?", (user_id,)
+
+    # find the membership first so trying to leave a household the user
+    # isn't actually part of gives a useful error instead of doing nothing
+    membership = conn.execute(
+        "SELECT id FROM household_members WHERE user_id = ? AND household_id = ?",
+        (user_id, household_id),
     ).fetchone()
+
+    if membership is None:
+        conn.close()
+        return jsonify({"error": "You are not a member of this household"}), 404
+
+    conn.execute(
+        "DELETE FROM household_members WHERE user_id = ? AND household_id = ?",
+        (user_id, household_id),
+    )
+    conn.commit()
     conn.close()
 
-    if user is None:
-        return jsonify({"error": "User not found"}), 404
-
-    return jsonify(dict(user)), 200
+    return jsonify({"message": "You left the household"}), 200
 
 
 # grocery list
 
 @app.route("/household/<int:household_id>/list", methods=["GET"])
 def get_list(household_id):
+    # the client sends the current user id so the server can check that
+    # the person asking for the list actually belongs to this household
+
+    user_id = request.args.get("user_id", type=int)
+
     conn = get_connection()
+
+    if not user_id or not user_is_member(conn, user_id, household_id):
+        conn.close()
+        return jsonify({"error": "You are not a member of this household"}), 403
     # JOIN combines rows from two tables, list_items doesn't store the
     # adder's name, only their id, so this pulls the actual name from
     # users in the same query instead of needing a second request
     items = conn.execute(
         """
         SELECT list_items.id, list_items.name, list_items.category,
-               list_items.checked_off, users.name AS added_by_name
+               list_items.quantity, list_items.checked_off, users.name AS added_by_name
         FROM list_items
         JOIN users ON list_items.added_by = users.id
         WHERE list_items.household_id = ?
@@ -291,6 +471,7 @@ def add_item(household_id):
     # if no category was sent, falls back to "Uncategorised" instead of
     # inserting an empty string
     category = data.get("category", "Uncategorised")
+    quantity = data.get("quantity", 1)
     added_by = data.get("user_id")
     # this flag lets the Tkinter client say "yes, I know it's a
     # duplicate, add it anyway", defaults to False so a normal add
@@ -300,7 +481,28 @@ def add_item(household_id):
     if not name or not added_by:
         return jsonify({"error": "name and user_id are required"}), 400
 
+    name = name.strip()
+    category = category.strip() or "Uncategorised"
+
+    if not name:
+        return jsonify({"error": "Enter a valid item name"}), 400
+
+    # quantity is stored separately from the item name in Version 2, so it
+    # needs to be checked before it gets written to the database
+    try:
+        quantity = int(quantity)
+    except (TypeError, ValueError):
+        return jsonify({"error": "Quantity must be a whole number"}), 400
+
+    if quantity < 1:
+        return jsonify({"error": "Quantity must be at least 1"}), 400
+
     conn = get_connection()
+
+    # make sure the person adding the item actually belongs to the household
+    if not user_is_member(conn, added_by, household_id):
+        conn.close()
+        return jsonify({"error": "You are not a member of this household"}), 403
 
     # only checks against items still on the list (checked_off = 0),
     # since re-adding something already bought and checked off is
@@ -321,16 +523,21 @@ def add_item(household_id):
     cursor = conn.cursor()
     cursor.execute(
         """
-        INSERT INTO list_items (household_id, name, category, added_by)
-        VALUES (?, ?, ?, ?)
+        INSERT INTO list_items (household_id, name, category, quantity, added_by)
+        VALUES (?, ?, ?, ?, ?)
         """,
-        (household_id, name, category, added_by),
+        (household_id, name, category, quantity, added_by),
     )
     conn.commit()
     item_id = cursor.lastrowid
     conn.close()
 
-    return jsonify({"item_id": item_id, "name": name, "category": category}), 201
+    return jsonify({
+        "item_id": item_id,
+        "name": name,
+        "category": category,
+        "quantity": quantity
+    }), 201
 
 
 @app.route("/list_item/<int:item_id>", methods=["PATCH"])
@@ -339,16 +546,58 @@ def update_item(item_id):
     # were actually sent in the request, rather than requiring the
     # whole item again
     data = request.get_json()
+    user_id = data.get("user_id")
+
+    if not user_id:
+        return jsonify({"error": "user_id is required"}), 400
 
     conn = get_connection()
+
+    item = conn.execute(
+        "SELECT household_id FROM list_items WHERE id = ?",
+        (item_id,),
+    ).fetchone()
+
+    if item is None:
+        conn.close()
+        return jsonify({"error": "Item not found"}), 404
+
+    # make sure a user can't update an item belonging to some other
+    # household just by knowing its id
+    if not user_is_member(conn, user_id, item["household_id"]):
+        conn.close()
+        return jsonify({"error": "You are not a member of this household"}), 403
+
     if "checked_off" in data:
         conn.execute(
             "UPDATE list_items SET checked_off = ? WHERE id = ?",
             (1 if data["checked_off"] else 0, item_id),
         )
     if "name" in data:
+        name = str(data["name"]).strip()
+
+        if not name:
+            conn.close()
+            return jsonify({"error": "Enter a valid item name"}), 400
+
         conn.execute(
-            "UPDATE list_items SET name = ? WHERE id = ?", (data["name"], item_id)
+            "UPDATE list_items SET name = ? WHERE id = ?", (name, item_id)
+        )
+
+    if "quantity" in data:
+        try:
+            quantity = int(data["quantity"])
+        except (TypeError, ValueError):
+            conn.close()
+            return jsonify({"error": "Quantity must be a whole number"}), 400
+
+        if quantity < 1:
+            conn.close()
+            return jsonify({"error": "Quantity must be at least 1"}), 400
+
+        conn.execute(
+            "UPDATE list_items SET quantity = ? WHERE id = ?",
+            (quantity, item_id),
         )
     conn.commit()
     conn.close()
@@ -358,7 +607,30 @@ def update_item(item_id):
 
 @app.route("/list_item/<int:item_id>", methods=["DELETE"])
 def delete_item(item_id):
+    # the user id is sent with the request so the server can check that
+    # this item belongs to a household the user is actually part of
+
+    data = request.get_json()
+    user_id = data.get("user_id")
+
+    if not user_id:
+        return jsonify({"error": "user_id is required"}), 400
+
     conn = get_connection()
+
+    item = conn.execute(
+        "SELECT household_id FROM list_items WHERE id = ?",
+        (item_id,),
+    ).fetchone()
+
+    if item is None:
+        conn.close()
+        return jsonify({"error": "Item not found"}), 404
+
+    if not user_is_member(conn, user_id, item["household_id"]):
+        conn.close()
+        return jsonify({"error": "You are not a member of this household"}), 403
+
     conn.execute("DELETE FROM list_items WHERE id = ?", (item_id,))
     conn.commit()
     conn.close()
@@ -372,7 +644,19 @@ def clear_checked_items(household_id):
     # of the Tkinter side calling delete_item() in a loop for each one,
     # one database operation is quicker and can't leave the list
     # half-cleared if something interrupts it partway through
+    data = request.get_json()
+    user_id = data.get("user_id")
+
+    if not user_id:
+        return jsonify({"error": "user_id is required"}), 400
+
     conn = get_connection()
+
+    # clearing checked items changes the whole household list, so check
+    # membership here too rather than trusting only the household id
+    if not user_is_member(conn, user_id, household_id):
+        conn.close()
+        return jsonify({"error": "You are not a member of this household"}), 403
     conn.execute(
         "DELETE FROM list_items WHERE household_id = ? AND checked_off = 1",
         (household_id,),
@@ -385,6 +669,6 @@ def clear_checked_items(household_id):
 
 if __name__ == "__main__":
     # use_reloader=False avoids a known Windows bug where Flask's
-    # auto-restart-on-save feature throws a socket error when the
+    # auto-restart-on-save feature throws a socket error when the*
     # server stops. debug=True is still on so errors are still easy to read
     app.run(debug=True, use_reloader=False)
